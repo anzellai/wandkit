@@ -1,0 +1,11 @@
+# Serverless directories
+.serverless
+
+package-lock.json
+
+# golang output binary directory
+# bin
+
+# golang vendor (dependencies) directory
+vendor
+node_modules/
