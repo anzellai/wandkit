@@ -69,6 +69,8 @@ const (
 	BleUUIDSensorTempChar = "64a70014f6914b93a6f40968f5b648f8"
 )
 
+type quaternion []uint16
+
 // WandKit struct...
 type WandKit struct {
 	device        ble.Device
@@ -76,6 +78,7 @@ type WandKit struct {
 	duration      time.Duration
 	cln           ble.Client
 	p             *ble.Profile
+	motions       []quaternion
 	subscriptions []*ble.Characteristic
 }
 
@@ -194,22 +197,6 @@ func (wk *WandKit) Explore() {
 				continue
 			}
 
-			for _, d := range c.Descriptors {
-				dspLogger := chrLogger.WithFields(log.Fields{
-					"descriptor":        d.UUID.String(),
-					"descriptor_name":   ble.Name(d.UUID),
-					"descriptor_handle": fmt.Sprintf("0x%02X", d.Handle),
-				})
-				dspLogger.Info("descriptor discovered")
-
-				b, err := wk.cln.ReadDescriptor(d)
-				if err != nil {
-					dspLogger.Errorf("read error: %v", err)
-					continue
-				}
-				dspLogger.Infof("value read: %x | %q", b, b)
-			}
-
 			// Don't bother to subscribe the Service Changed characteristics.
 			if c.UUID.Equal(ble.ServiceChangedUUID) {
 				continue
@@ -230,8 +217,76 @@ func (wk *WandKit) Explore() {
 				}
 				wk.subscriptions = append(wk.subscriptions, c)
 			}
+
+			for _, d := range c.Descriptors {
+				dspLogger := chrLogger.WithFields(log.Fields{
+					"descriptor":        d.UUID.String(),
+					"descriptor_name":   ble.Name(d.UUID),
+					"descriptor_handle": fmt.Sprintf("0x%02X", d.Handle),
+				})
+				dspLogger.Info("descriptor discovered")
+
+				b, err := wk.cln.ReadDescriptor(d)
+				if err != nil {
+					dspLogger.Errorf("read error: %v", err)
+					continue
+				}
+				dspLogger.Infof("value read: %x | %q", b, b)
+			}
 		}
 	}
+}
+
+// Motion calculates if a keyboard arrow should trigger
+func (wk *WandKit) Motion(w, x, y, z uint16) (action string) {
+	action = "noop"
+	var avgW, avgX, avgY, avgZ, avgWW, avgXX, avgYY, avgZZ uint16
+	mLogger := wk.logger.WithFields(log.Fields{
+		"position": []uint16{w, x, y, z},
+		"before":   []uint16{avgW, avgX, avgY, avgZ},
+		"after":    []uint16{avgWW, avgXX, avgYY, avgZZ},
+	})
+	defer mLogger.Debugf("motion: %s", action)
+
+	if len(wk.motions) < 10 {
+		return
+	}
+	for idx, motion := range wk.motions {
+		if idx < 5 {
+			avgW += motion[0]
+			avgX += motion[1]
+			avgY += motion[2]
+			avgZ += motion[3]
+		} else {
+			avgWW += motion[0]
+			avgXX += motion[1]
+			avgYY += motion[2]
+			avgZZ += motion[3]
+		}
+	}
+	avgW = avgW / uint16(len(wk.motions)/2)
+	avgX = avgX / uint16(len(wk.motions)/2)
+	avgY = avgY / uint16(len(wk.motions)/2)
+	avgZ = avgZ / uint16(len(wk.motions)/2)
+	avgWW = avgWW / uint16(len(wk.motions)/2)
+	avgXX = avgXX / uint16(len(wk.motions)/2)
+	avgYY = avgYY / uint16(len(wk.motions)/2)
+	avgZZ = avgZZ / uint16(len(wk.motions)/2)
+
+	stdVX := uint16((avgX + avgXX) / 4)
+	stdVY := uint16((avgY + avgYY) / 4)
+
+	if avgX > avgXX+stdVX {
+		action = "left"
+	} else if avgX > avgXX-stdVX {
+		action = "right"
+	}
+	if avgY > avgYY+stdVY {
+		action = "up"
+	} else if avgY > avgYY-stdVY {
+		action = "down"
+	}
+	return
 }
 
 func onCallback(wk *WandKit) func([]byte) {
@@ -247,8 +302,17 @@ func onCallback(wk *WandKit) func([]byte) {
 		// Sensor Quaternions
 		if len(req) == 8 {
 			w, x, y, z := ToUint16(req[0], req[1]), ToUint16(req[2], req[3]), ToUint16(req[4], req[5]), ToUint16(req[6], req[7])
-			mouseMove(cbLogger, w, x, y, z)
+			wk.motions = append(wk.motions, []uint16{w, x, y, z})
+			if len(wk.motions) > 10 {
+				wk.motions = wk.motions[1:]
+			}
 			cbLogger.Debugf("position: [%d, %d, %d, %d]", w, x, y, z)
+			motion := wk.Motion(w, x, y, z)
+			if motion != "noop" {
+				// FIXME: Disable for now until useful!
+				// keyboardArrow(cbLogger, motion)
+				wk.motions = nil
+			}
 		}
 	}
 }
@@ -260,20 +324,9 @@ func mouseClick(logger *log.Entry, input byte) {
 	}
 }
 
-func mouseMove(logger *log.Entry, w, x, y, z uint16) {
-	mX, mY := robotgo.GetMousePos()
-	if x+z > y+w+1000 {
-		mX += 10
-	} else if x+z < y+w-1000 {
-		mX -= 10
-	}
-	if x+y > w+z+1000 {
-		mY += 10
-	} else if x+y < w+z-1000 {
-		mY -= 10
-	}
-	robotgo.MoveMouse(mX, mY)
-	logger.Debugf("mouse-move: [%d, %d]", mX, mY)
+func keyboardArrow(logger *log.Entry, input string) {
+	robotgo.KeyTap(input)
+	logger.Debugf("keyboard-tap: [%s]", input)
 }
 
 // ToUint16 helper function to convert 2 bytes to Uint16
