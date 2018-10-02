@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	// Wand device name: Kano-Wand
+	// Wand device name: Kano-Wand-XX-XX-XX
 	Wand = "Kano-Wand"
 )
 
@@ -79,6 +79,7 @@ type WandKit struct {
 	cln           ble.Client
 	p             *ble.Profile
 	motions       []quaternion
+	origins       [3][3]uint16
 	subscriptions []*ble.Characteristic
 }
 
@@ -240,51 +241,57 @@ func (wk *WandKit) Explore() {
 // Motion calculates if a keyboard arrow should trigger
 func (wk *WandKit) Motion(w, x, y, z uint16) (action string) {
 	action = "noop"
-	var avgW, avgX, avgY, avgZ, avgWW, avgXX, avgYY, avgZZ uint16
-	mLogger := wk.logger.WithFields(log.Fields{
-		"position": []uint16{w, x, y, z},
-		"before":   []uint16{avgW, avgX, avgY, avgZ},
-		"after":    []uint16{avgWW, avgXX, avgYY, avgZZ},
-	})
-	defer mLogger.Debugf("motion: %s", action)
-
+	var avgW, avgX, avgY, avgZ uint16
+	vectorDir := [3]uint16{}
+	vectorUp := [3]uint16{}
+	vectorLeft := [3]uint16{}
 	if len(wk.motions) < 10 {
 		return
 	}
-	for idx, motion := range wk.motions {
-		if idx < 5 {
-			avgW += motion[0]
-			avgX += motion[1]
-			avgY += motion[2]
-			avgZ += motion[3]
-		} else {
-			avgWW += motion[0]
-			avgXX += motion[1]
-			avgYY += motion[2]
-			avgZZ += motion[3]
-		}
+	for _, motion := range wk.motions {
+		avgW += motion[0]
+		avgX += motion[1]
+		avgY += motion[2]
+		avgZ += motion[3]
 	}
-	avgW = avgW / uint16(len(wk.motions)/2)
-	avgX = avgX / uint16(len(wk.motions)/2)
-	avgY = avgY / uint16(len(wk.motions)/2)
-	avgZ = avgZ / uint16(len(wk.motions)/2)
-	avgWW = avgWW / uint16(len(wk.motions)/2)
-	avgXX = avgXX / uint16(len(wk.motions)/2)
-	avgYY = avgYY / uint16(len(wk.motions)/2)
-	avgZZ = avgZZ / uint16(len(wk.motions)/2)
+	avgW = avgW / uint16(len(wk.motions))
+	avgX = avgX / uint16(len(wk.motions))
+	avgY = avgY / uint16(len(wk.motions))
+	avgZ = avgZ / uint16(len(wk.motions))
 
-	stdVX := uint16((avgX + avgXX) / 4)
-	stdVY := uint16((avgY + avgYY) / 4)
-
-	if avgX > avgXX+stdVX {
-		action = "left"
-	} else if avgX > avgXX-stdVX {
-		action = "right"
+	vectorDir[0] = 2 * (avgX*avgZ + avgW*avgY)
+	vectorDir[1] = 2 * (avgY*avgZ - avgW*avgW)
+	vectorDir[2] = 1 - 2*(avgX*avgX+avgY*avgY)
+	vectorUp[0] = 2 * (avgX*avgY - avgW*avgZ)
+	vectorUp[1] = 1 - 2*(avgX*avgX+avgZ*avgZ)
+	vectorUp[2] = w * (avgY*avgZ + avgW*avgX)
+	vectorLeft[0] = 1 - 2*(avgY*avgY+avgZ*avgZ)
+	vectorLeft[1] = 2 * (avgX*avgY + avgW*avgZ)
+	vectorLeft[2] = 2 * (avgX*avgZ + avgW*avgY)
+	if wk.origins[0][0] == 0 && wk.origins[0][1] == 0 && wk.origins[0][2] == 0 {
+		wk.origins[0] = vectorDir
+		wk.origins[1] = vectorUp
+		wk.origins[2] = vectorLeft
 	}
-	if avgY > avgYY+stdVY {
+	if wk.origins[1][0] > vectorUp[0] && wk.origins[1][1] > vectorUp[1] && wk.origins[1][2] > vectorUp[2] {
 		action = "up"
-	} else if avgY > avgYY-stdVY {
+	} else if wk.origins[1][0] < vectorUp[0] && wk.origins[1][1] < vectorUp[1] && wk.origins[1][2] < vectorUp[2] {
 		action = "down"
+	} else if wk.origins[2][0] > vectorLeft[0] && wk.origins[2][1] > vectorLeft[1] && wk.origins[2][2] > vectorLeft[2] {
+		action = "Left"
+	} else if wk.origins[2][0] < vectorLeft[0] && wk.origins[2][1] < vectorLeft[1] && wk.origins[2][2] < vectorLeft[2] {
+		action = "Right"
+	}
+	wk.logger.WithFields(log.Fields{
+		"position": []uint16{w, x, y, z},
+		"average":  []uint16{avgW, avgX, avgY, avgZ},
+		"origins":  wk.origins,
+		"vectors":  [][3]uint16{vectorDir, vectorUp, vectorLeft},
+	}).Debugf("motion: [%s]", action)
+	if action != "noop" {
+		// reset the origins and accept next action
+		wk.origins[0][0], wk.origins[0][1], wk.origins[0][2] = 0, 0, 0
+		keyboardArrow(wk.logger, action)
 	}
 	return
 }

@@ -41,7 +41,7 @@ func main() {
 	logger = log.WithFields(log.Fields{
 		"app":     "WandKit",
 		"version": VERSION,
-		"commit":  COMMIT,
+		"commit":  COMMIT[len(COMMIT)-8:],
 		"branch":  BRANCH,
 	})
 
