@@ -96,33 +96,35 @@ func New(l *log.Entry, d time.Duration) *WandKit {
 		subscriptions: []*ble.Characteristic{},
 	}
 	ble.SetDefaultDevice(wk.device)
-	defer func() {
-		sigc := make(chan os.Signal, 1)
-		signal.Notify(sigc,
-			syscall.SIGINT,
-			syscall.SIGTERM,
-		)
-		go func() {
-			<-sigc
-			if wk.p != nil && wk.subscriptions != nil && len(wk.subscriptions) > 0 {
-				for _, subscription := range wk.subscriptions {
-					subLogger := wk.logger.WithFields(log.Fields{
-						"subscription":        subscription.UUID.String(),
-						"subscription_name":   ble.Name(subscription.UUID),
-						"subscription_handle": fmt.Sprintf("0x%02X", subscription.Handle),
-					})
-					if err := wk.cln.Unsubscribe(subscription, false); err != nil {
-						subLogger.Fatalf("unsubscribe error: %v", err)
-					}
-					subLogger.Info("subscription unsubscribed")
+
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT)
+	go func() {
+		<-sigc
+		if wk.p != nil && wk.subscriptions != nil && len(wk.subscriptions) > 0 {
+			for _, subscription := range wk.subscriptions {
+				subLogger := wk.logger.WithFields(log.Fields{
+					"subscription":        subscription.UUID.String(),
+					"subscription_name":   ble.Name(subscription.UUID),
+					"subscription_handle": fmt.Sprintf("0x%02X", subscription.Handle),
+				})
+				if err := wk.cln.Unsubscribe(subscription, false); err != nil {
+					subLogger.Fatalf("unsubscribe error: %v", err)
 				}
+				subLogger.Info("subscription unsubscribed")
 			}
-			err := wk.cln.CancelConnection()
-			if err != nil {
-				wk.logger.Errorf("can't disconnect: %v", err)
-			}
-			os.Exit(0)
+		}
+		defer func() {
+			wk.cln = nil
+			wk.p = nil
 		}()
+		err := wk.cln.CancelConnection()
+		if err != nil {
+			wk.logger.Errorf("can't disconnect: %v", err)
+			os.Exit(-1)
+		}
+		wk.logger.Info("disconnected")
+		os.Exit(0)
 	}()
 	return wk
 }
