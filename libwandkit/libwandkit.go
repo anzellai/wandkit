@@ -78,6 +78,8 @@ type WandKit struct {
 	duration      time.Duration
 	cln           ble.Client
 	p             *ble.Profile
+	button        bool
+	actions       []string
 	motions       []quaternion
 	origins       [3][3]uint16
 	subscriptions []*ble.Characteristic
@@ -303,13 +305,21 @@ func onCallback(wk *WandKit) func([]byte) {
 		"callback": "onData",
 	})
 	return func(req []byte) {
+		if wk.p == nil || wk.subscriptions == nil || len(wk.subscriptions) == 0 {
+			return
+		}
 		// UserButton
 		if len(req) <= 2 {
-			mouseClick(cbLogger, req[0])
+			wk.button = req[0] == 1
+			if wk.button {
+				mouseClick(cbLogger, req[0])
+			} else {
+				wk.motions = nil
+			}
 			cbLogger.Debugf("user-button: [%d]", req[0])
 		} else
 		// Sensor Quaternions
-		if len(req) == 8 {
+		if len(req) == 8 && wk.button {
 			w, x, y, z := ToUint16(req[0], req[1]), ToUint16(req[2], req[3]), ToUint16(req[4], req[5]), ToUint16(req[6], req[7])
 			wk.motions = append(wk.motions, []uint16{w, x, y, z})
 			if len(wk.motions) > 10 {
@@ -318,9 +328,19 @@ func onCallback(wk *WandKit) func([]byte) {
 			cbLogger.Debugf("position: [%d, %d, %d, %d]", w, x, y, z)
 			motion := wk.Motion(w, x, y, z)
 			if motion != "noop" {
-				// FIXME: Disable for now until useful!
-				// keyboardArrow(cbLogger, motion)
-				wk.motions = nil
+				wk.actions = append(wk.actions, motion)
+				if len(wk.actions) > 2 {
+					for _, action := range wk.actions {
+						if action != motion {
+							wk.actions = nil
+							wk.motions = nil
+							return
+						}
+					}
+					// FIXME: Disable for now until useful!
+					keyboardArrow(cbLogger, motion)
+					wk.motions = nil
+				}
 			}
 		}
 	}
