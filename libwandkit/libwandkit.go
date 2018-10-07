@@ -69,7 +69,7 @@ const (
 	BleUUIDSensorTempChar = "64a70014f6914b93a6f40968f5b648f8"
 )
 
-type quaternion []uint16
+type quaternion []float64
 
 // WandKit struct...
 type WandKit struct {
@@ -243,59 +243,19 @@ func (wk *WandKit) Explore() {
 }
 
 // Motion calculates if a keyboard arrow should trigger
-func (wk *WandKit) Motion(w, x, y, z uint16) (action string) {
+func (wk *WandKit) Motion(w, x, y, z float64) (action string) {
 	action = "noop"
-	var avgW, avgX, avgY, avgZ uint16
-	vectorDir := [3]uint16{}
-	vectorUp := [3]uint16{}
-	vectorLeft := [3]uint16{}
-	if len(wk.motions) < 10 {
-		return
-	}
-	for _, motion := range wk.motions {
-		avgW += motion[0]
-		avgX += motion[1]
-		avgY += motion[2]
-		avgZ += motion[3]
-	}
-	avgW = avgW / uint16(len(wk.motions))
-	avgX = avgX / uint16(len(wk.motions))
-	avgY = avgY / uint16(len(wk.motions))
-	avgZ = avgZ / uint16(len(wk.motions))
-
-	vectorDir[0] = 2 * (avgX*avgZ + avgW*avgY)
-	vectorDir[1] = 2 * (avgY*avgZ - avgW*avgW)
-	vectorDir[2] = 1 - 2*(avgX*avgX+avgY*avgY)
-	vectorUp[0] = 2 * (avgX*avgY - avgW*avgZ)
-	vectorUp[1] = 1 - 2*(avgX*avgX+avgZ*avgZ)
-	vectorUp[2] = w * (avgY*avgZ + avgW*avgX)
-	vectorLeft[0] = 1 - 2*(avgY*avgY+avgZ*avgZ)
-	vectorLeft[1] = 2 * (avgX*avgY + avgW*avgZ)
-	vectorLeft[2] = 2 * (avgX*avgZ + avgW*avgY)
-	if wk.origins[0][0] == 0 && wk.origins[0][1] == 0 && wk.origins[0][2] == 0 {
-		wk.origins[0] = vectorDir
-		wk.origins[1] = vectorUp
-		wk.origins[2] = vectorLeft
-	}
-	if wk.origins[1][0] > vectorUp[0] && wk.origins[1][1] > vectorUp[1] && wk.origins[1][2] > vectorUp[2] {
-		action = "up"
-	} else if wk.origins[1][0] < vectorUp[0] && wk.origins[1][1] < vectorUp[1] && wk.origins[1][2] < vectorUp[2] {
-		action = "down"
-	} else if wk.origins[2][0] > vectorLeft[0] && wk.origins[2][1] > vectorLeft[1] && wk.origins[2][2] > vectorLeft[2] {
-		action = "Left"
-	} else if wk.origins[2][0] < vectorLeft[0] && wk.origins[2][1] < vectorLeft[1] && wk.origins[2][2] < vectorLeft[2] {
-		action = "Right"
-	}
+	quat := NewQuantarionTo2d(1400, 800, Quantarion{x: x, y: y, z: z, w: w})
+	motionX, motionY, pitch, roll, yaw := quat.Position()
 	wk.logger.WithFields(log.Fields{
-		"position": []uint16{w, x, y, z},
-		"average":  []uint16{avgW, avgX, avgY, avgZ},
-		"origins":  wk.origins,
-		"vectors":  [][3]uint16{vectorDir, vectorUp, vectorLeft},
-	}).Debugf("motion: [%s]", action)
+		"x": motionX,
+		"y": motionY,
+	}).Debugf("motion-position: [%f, %f, %f]", pitch, roll, yaw)
 	if action != "noop" {
+		// FIXME: need to figure out the mapping to action
 		// reset the origins and accept next action
-		wk.origins[0][0], wk.origins[0][1], wk.origins[0][2] = 0, 0, 0
-		keyboardArrow(wk.logger, action)
+		// wk.origins[0][0], wk.origins[0][1], wk.origins[0][2] = 0, 0, 0
+		// keyboardArrow(wk.logger, action)
 	}
 	return
 }
@@ -319,14 +279,15 @@ func onCallback(wk *WandKit) func([]byte) {
 			cbLogger.Debugf("user-button: [%d]", req[0])
 		} else
 		// Sensor Quaternions
-		if len(req) == 8 && wk.button {
+		// if len(req) == 8 && wk.button {
+		if len(req) == 8 {
 			w, x, y, z := ToUint16(req[0], req[1]), ToUint16(req[2], req[3]), ToUint16(req[4], req[5]), ToUint16(req[6], req[7])
-			wk.motions = append(wk.motions, []uint16{w, x, y, z})
+			wk.motions = append(wk.motions, []float64{float64(w), float64(x), float64(y), float64(z)})
 			if len(wk.motions) > 10 {
 				wk.motions = wk.motions[1:]
 			}
 			cbLogger.Debugf("position: [%d, %d, %d, %d]", w, x, y, z)
-			motion := wk.Motion(w, x, y, z)
+			motion := wk.Motion(float64(w), float64(x), float64(y), float64(z))
 			if motion != "noop" {
 				wk.actions = append(wk.actions, motion)
 				if len(wk.actions) > 2 {
