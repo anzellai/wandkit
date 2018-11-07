@@ -156,6 +156,7 @@ func DefaultDarwinDevice() (d ble.Device, err error) {
 // Connect will scan and get WandKit device
 func (wk *WandKit) Connect() {
 	filter := func(a ble.Advertisement) bool {
+		wk.logger.Infof("Scanned device name: %s", a.LocalName())
 		return strings.HasPrefix(strings.ToUpper(a.LocalName()), strings.ToUpper(Wand))
 	}
 	wk.logger.Infof("scanning %s for %s", Wand, wk.duration)
