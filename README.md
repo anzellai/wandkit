@@ -26,7 +26,6 @@ Apart from the cmd binary, `wandkit` is also an independent library available to
 Simply run the compiled binary `./bin/wandkit-darwin` should work, it will create new device interface, connect to the first Kano Wand, and start exploring service/characteristics -- I have only selected `UserButton` and `SensorQuaternions` characteristics for simulating computer mouse HID.
 
 More work to do on the calculation with quaternions to mouse XY 2d movement. I'm also thinking to only use gesture to simulate keyboard Arrow Keys mapping as it will be more reliable.
-code
 
 Anyhow, let's start poking fun with our Kano Wand Kit, and happy hacking!
 
